@@ -48,6 +48,6 @@ AI 有助于组织需求和发现遗漏，但不能替代甲方确认与人工�
 
 ## 四、版本信息
 
-- 仓库地址：尚未配置远程仓库；本地目录为 F:\大三上 软工\repos_new。
+- 仓库地址：https://github.com/Kamisato-Ayaka2025/shared-ledger-lab1-repos-new（私有仓库）。
 - lab1-ai-draft 完整提交编号：b581ca15da7ce4b299e3fbce0622a97ad78af4e6。
-- lab1-final 完整提交编号：尚未创建，待最终提交后填写。
+- lab1-final 完整提交编号：880eee9c63196643e56f2098a0f8f22f88238df5。
