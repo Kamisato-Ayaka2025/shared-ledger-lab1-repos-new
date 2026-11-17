@@ -72,7 +72,7 @@ def launch():
         except (httpx.HTTPError, ValueError):
             return False
 
-    if not healthy():
+    def start_service():
         command = [sys.executable]
         if not getattr(sys, "frozen", False):
             command.append(str(Path(__file__).resolve()))
@@ -80,7 +80,7 @@ def launch():
         folder = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Tongzhang"
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / "startup.log").open("a", encoding="utf-8") as log:
-            subprocess.Popen(
+            child = subprocess.Popen(
                 command,
                 stdout=log,
                 stderr=log,
@@ -90,9 +90,24 @@ def launch():
             if healthy():
                 break
             time.sleep(0.25)
-    from tongzhang.desktop import main
+        return child
 
-    main()
+    from tongzhang.runtime import RuntimeLease
+
+    folder = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Tongzhang"
+    lease = RuntimeLease(folder, service_port())
+    lease.acquire(healthy, start_service, sys.executable)
+    try:
+        if "--verify-tray" in sys.argv:
+            from tray_driver import main
+
+            main(sys.argv[sys.argv.index("--verify-tray") + 1])
+        else:
+            from tongzhang.desktop import main
+
+            main()
+    finally:
+        lease.release()
 
 
 if __name__ == "__main__":

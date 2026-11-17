@@ -923,7 +923,7 @@ class Window(QMainWindow):
                 self.refresh()
                 self.show()
             else:
-                self.close()
+                QApplication.instance().quit()
 
         self.client.request("POST", "/logout", logged_out)
 
@@ -943,6 +943,9 @@ def main():
     if login.exec() != QDialog.DialogCode.Accepted:
         return
     window = Window(client)
+    from .tray import TrayController
+
+    window.tray_controller = TrayController(window)
     window.show()
     sys.exit(app.exec())
 
