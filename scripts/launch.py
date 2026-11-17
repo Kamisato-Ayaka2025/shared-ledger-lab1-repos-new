@@ -8,6 +8,15 @@ from pathlib import Path
 import httpx
 
 
+def service_port():
+    """Allow an isolated instance for tests; production uses 8765."""
+    return int(os.environ.get("TONGZHANG_PORT", "8765"))
+
+
+def service_base():
+    return "http://127.0.0.1:" + str(service_port())
+
+
 def launch():
     if "--e2e-resume" in sys.argv:
         from e2e_driver import main
@@ -49,13 +58,16 @@ def launch():
             encoding="utf-8",
         )
         uvicorn.run(
-            create_app(folder / "demo.db", demo=True), host="127.0.0.1", port=8765, log_config=None
+            create_app(folder / "demo.db", demo=True),
+            host="127.0.0.1",
+            port=service_port(),
+            log_config=None,
         )
         return
 
     def healthy():
         try:
-            result = httpx.get("http://127.0.0.1:8765/health", timeout=0.5)
+            result = httpx.get(service_base() + "/health", timeout=0.5)
             return result.status_code == 200 and result.json().get("version") == "0.1.0"
         except (httpx.HTTPError, ValueError):
             return False

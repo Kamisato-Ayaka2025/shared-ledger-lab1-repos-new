@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-exe = root / "dist/Tongzhang/Tongzhang.exe"
+exe = Path(os.environ.get("TONGZHANG_EXE", root / "dist/Tongzhang/Tongzhang.exe"))
 assert not (exe.parent / "_internal/icuuc.dll").exists(), "Conflicting ICU DLL bundled"
 with tempfile.TemporaryDirectory() as temp:
     screenshot = Path(temp) / "login.png"

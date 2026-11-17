@@ -1,14 +1,22 @@
 """Exercise the frozen UI through Qt input, real forms and real HTTP."""
 
 import json
+import os
 import time
 from pathlib import Path
+
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialogButtonBox, QInputDialog, QMessageBox, QPushButton
-from tongzhang.widgets import Client, LoginDialog
-from tongzhang.desktop import Window, configure_fonts, STYLE
-from tongzhang.forms import EntryDialog
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialogButtonBox,
+    QMessageBox,
+    QPushButton,
+)
+
+from tongzhang.desktop import STYLE, Window, configure_fonts
+from tongzhang.forms import BudgetDialog, EntryDialog, InvitationDialog
+from tongzhang.widgets import Client, LoginDialog, TextPrompt
 
 
 class Journey:
@@ -24,7 +32,10 @@ class Journey:
         self.errors = []
         self.answers = []
         self.steps = []
+        self.base = os.environ.get("TONGZHANG_BASE", "")
         self.form_action = None
+        self.budget_action = None
+        self.invitation_action = None
         self.timer = QTimer()
         self.timer.timeout.connect(self.modal)
         self.timer.start(30)
@@ -41,7 +52,7 @@ class Journey:
         raise AssertionError("Timed out: " + label)
 
     def idle(self):
-        self.wait(lambda: all(not c.pending for c in self.clients), "HTTP completion")
+        self.wait(lambda: all(not client.pending for client in self.clients), "HTTP completion")
         self.app.processEvents()
 
     def modal(self):
@@ -59,24 +70,34 @@ class Journey:
                 button = dialog.button(choice)
                 if button:
                     QTest.mouseClick(button, Qt.MouseButton.LeftButton)
-            elif isinstance(dialog, QInputDialog) and self.answers:
-                value = self.answers.pop(0)
-                dialog.setTextValue(value)
-                dialog.accept()
+            elif isinstance(dialog, TextPrompt):
+                if self.answers:
+                    dialog.field.setText(self.answers.pop(0))
+                    dialog.accept_value()
             elif isinstance(dialog, EntryDialog) and self.form_action:
                 action, self.form_action = self.form_action, None
                 action(dialog)
+            elif isinstance(dialog, BudgetDialog) and self.budget_action:
+                action, self.budget_action = self.budget_action, None
+                action(dialog)
+            elif isinstance(dialog, InvitationDialog) and self.invitation_action:
+                self.invitation_action(dialog)
         except Exception as exc:
             self.errors.append(repr(exc))
             dialog.reject()
 
     def click(self, window, label):
         matches = [
-            b for b in window.findChildren(QPushButton) if b.text() == label and b.isVisible()
+            button
+            for button in window.findChildren(QPushButton)
+            if button.text() == label and button.isVisible()
         ]
         assert len(matches) == 1, (label, len(matches))
-        assert matches[0].isEnabled(), label + " disabled"
-        QTest.mouseClick(matches[0], Qt.MouseButton.LeftButton)
+        self.click_button(window, matches[0])
+
+    def click_button(self, window, button):
+        assert button.isEnabled(), button.text() + " disabled"
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
         self.idle()
 
     def record(self, name, window):
@@ -89,6 +110,8 @@ class Journey:
 
     def login(self, username):
         client = Client()
+        if self.base:
+            client.base = self.base
         client.error.connect(self.errors.append)
         self.clients.append(client)
         dialog = LoginDialog(client)
@@ -107,25 +130,57 @@ class Journey:
     def refresh(self, window):
         self.click(window, "刷新")
 
-    def entry(self, window, amount, direction="EXPENSE", edit=None):
+    def entry(self, window, amount, direction="EXPENSE", edit=False):
         def populate(dialog):
             dialog.direction.setCurrentIndex(dialog.direction.findData(direction))
             dialog.amount.setText(amount)
-            dialog.note.setPlainText("打包端到端自动验收")
+            dialog.note.setText("打包端到端自动验收")
             if edit:
                 dialog.reason.setText("端到端更正")
+            dialog.clear_allocations()
             for index, member in enumerate(dialog.members):
-                dialog.allocations.item(index, 1).setText(
-                    amount if member["username"] == "alice" else ""
-                )
+                if member["username"] == "alice":
+                    dialog.allocations.item(index, 1).setText(amount)
             QTest.mouseClick(
                 dialog.buttons.button(QDialogButtonBox.StandardButton.Save),
                 Qt.MouseButton.LeftButton,
             )
 
         self.form_action = populate
-        self.click(window, edit or "新增收支")
+        if edit:
+            self.click_button(window, window.edit_button)
+        else:
+            self.click(window, "新增账目")
         self.wait(lambda: self.form_action is None, "entry form")
+        self.idle()
+
+    def budget(self, window, amount, reason):
+        def fill(dialog):
+            dialog.amount.setText(amount)
+            dialog.reason.setText(reason)
+            dialog.save()
+
+        self.budget_action = fill
+        self.click(window, "设置预算")
+        self.wait(lambda: self.budget_action is None, "budget form")
+        self.wait(lambda: not any(client.pending for client in self.clients), "budget save")
+        self.idle()
+
+    def invitation(self, window, ledger):
+        stage = {"value": 0}
+
+        def handle(dialog):
+            if stage["value"] == 0 and dialog.mine:
+                dialog.accept_first()
+                stage["value"] = 1
+            elif stage["value"] == 1 and window.ledger_id == ledger:
+                stage["value"] = 2
+                dialog.accept()
+
+        self.invitation_action = handle
+        self.click(window, "邀请管理")
+        self.wait(lambda: window.ledger_id == ledger, "invitation acceptance")
+        self.invitation_action = None
         self.idle()
 
     def select(self, window, amount=None, status=None):
@@ -142,25 +197,17 @@ class Journey:
         manager = self.login("manager")
         self.record("管理员实际登录", manager)
         self.answers = ["打包验收账本"]
-        self.click(manager, "创建账本")
+        self.click(manager, "新建账本")
         assert manager.ledger_id
         ledger = manager.ledger_id
         self.record("通过创建表单建账", manager)
         manager.tabs.setCurrentIndex(1)
         person = next(u for u in manager.state["users"] if u["username"] == "alice")
         manager.people.setCurrentIndex(manager.people.findData(person["id"]))
-        self.click(manager, "邀请加入当前账本")
+        self.click(manager, "发送邀请")
         alice = self.login("alice")
         alice.tabs.setCurrentIndex(1)
-        # The invitation chooser contains a generated id; read it through UI-loaded bootstrap.
-        self.refresh(alice)
-        invitation = alice.state["invitations"][0]
-        self.answers = [
-            f"{invitation['ledger_name']} · 邀请人 {invitation['inviter']} · {invitation['id'][:8]}"
-        ]
-        self.click(alice, "我的待处理邀请")
-        self.wait(lambda: alice.ledger_id == ledger, "invitation acceptance")
-        self.idle()
+        self.invitation(alice, ledger)
         self.record("成员登录并在界面接受邀请", alice)
         self.refresh(manager)
         manager.tabs.setCurrentIndex(0)
@@ -174,10 +221,7 @@ class Journey:
         assert self.select(manager, 215000)["status"] == "APPROVED"
         self.record("管理员审核支出", manager)
         manager.tabs.setCurrentIndex(2)
-        from datetime import date
-
-        self.answers = [date.today().strftime("%Y-%m"), "5000", "首次预算"]
-        self.click(manager, "设置月度预算")
+        self.budget(manager, "5000", "首次预算")
         assert manager.budgets[0]["available"] == 285000, manager.budgets
         self.record("设置预算5000并核对余额2850", manager)
         self.entry(alice, "1200", "INCOME")
@@ -207,11 +251,11 @@ class Journey:
         self.answers = ["请修正金额"]
         self.click(manager, "驳回")
         self.select(alice, 10000, "REJECTED")
-        self.entry(alice, "80", edit="驳回重交")
+        self.entry(alice, "80", edit=True)
         self.select(manager, 8000, "PENDING")
         self.click(manager, "审核通过")
         self.select(manager, 8000, "APPROVED")
-        self.entry(manager, "90", edit="更正已审核")
+        self.entry(manager, "90", edit=True)
         corrected = self.select(manager, 9000, "PENDING")
         assert corrected["source_id"]
         self.record("驳回重交审核与更正完整链路", manager)

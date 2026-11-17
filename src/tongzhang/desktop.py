@@ -2,226 +2,409 @@
 
 import sys
 from datetime import date
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
+    QComboBox,
+    QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QComboBox,
     QLineEdit,
-    QTabWidget,
-    QInputDialog,
+    QMainWindow,
     QMessageBox,
-    QDialog,
-    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
-from .widgets import Client, LoginDialog, table, fill, currency, show_json, confirm
-from .forms import EntryDialog
 
-STATUS = {"PENDING": "待审核", "APPROVED": "已审核", "REJECTED": "已驳回", "WITHDRAWN": "已撤回"}
-STYLE = """
-QMainWindow,QDialog { background:#f3f6f5; }
-QWidget { font-family:'Microsoft YaHei'; font-size:13px; color:#203b36; }
-QLabel#hero { font-size:25px; font-weight:700; padding:12px; color:#166655; }
-QLabel#summary { background:#e1efe9; border-radius:8px; padding:18px; font-size:18px; }
-QPushButton { background:#187662; color:white; border:0; border-radius:5px; padding:9px 15px; }
-QPushButton:hover { background:#245f53; }
-QPushButton:disabled { background:#a9bdb7; }
-QLineEdit,QComboBox,QTextEdit { background:white; border:1px solid #c8d8d1; border-radius:4px; padding:7px; }
-QTableWidget { background:white; alternate-background-color:#f1f7f4; gridline-color:#e1e9e5; border:1px solid #d5e0db; }
-QHeaderView::section { background:#e3ede8; border:0; padding:9px; font-weight:600; }
-QTabBar::tab { padding:12px 18px; background:#e2ebe7; }
-QTabBar::tab:selected { background:#187662; color:white; }
-"""
+from .forms import (
+    BudgetDialog,
+    EntryDetailDialog,
+    EntryDialog,
+    InvitationDialog,
+    LogDetailDialog,
+    SnapshotDialog,
+)
+from .widgets import (
+    ACCENT,
+    DANGER,
+    EXPENSE,
+    INCOME,
+    INK,
+    MUTED,
+    OK,
+    STATUS,
+    STATUS_COLORS,
+    STYLE,
+    WARN,
+    Card,
+    Cell,
+    ChoicePrompt,
+    Client,
+    LoginDialog,
+    StatCard,
+    TextPrompt,
+    action_label,
+    beijing,
+    configure_fonts,
+    confirm,
+    date_field,
+    date_text,
+    direction_label,
+    fill,
+    new_button,
+    short_id,
+    table,
+    yuan,
+)
+
+ACTION_LABELS = {"approve": "审核通过", "reject": "驳回", "withdraw": "撤回"}
+EDIT_LABELS = {"edit": "修改待审", "correct": "更正", "resubmit": "驳回重交"}
 
 
 class Window(QMainWindow):
     def __init__(self, client):
         super().__init__()
         self.client = client
+        self.user_id = ""
         self.state = {}
         self.context_data = {}
         self.entries = []
         self.budgets = []
         self.snapshots = []
         self.logs = []
+        self.filtered_logs = []
+        self.pending_action = None
         self.setWindowTitle("同账 · 多人共享记账")
         self.resize(1280, 850)
         root = QWidget()
         self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-        top = QHBoxLayout()
-        heading = QLabel("同账")
-        heading.setObjectName("hero")
-        top.addWidget(heading)
-        self.identity = QLabel()
-        top.addWidget(self.identity)
-        top.addStretch()
-        self.ledgers = QComboBox()
-        self.ledgers.setMinimumWidth(220)
-        top.addWidget(self.ledgers)
-        self.create_button = self.button("创建账本", self.create_ledger, top)
-        self.button("刷新", self.refresh, top)
-        self.button("切换账号", self.switch_user, top)
-        layout.addLayout(top)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self.build_header())
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(26, 16, 26, 12)
+        body_layout.setSpacing(0)
+        outer.addWidget(body, 1)
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        self.tabs.setDocumentMode(True)
+        body_layout.addWidget(self.tabs, 1)
         self.build_entries()
         self.build_members()
         self.build_finance()
         self.build_audit()
         self.ledgers.currentIndexChanged.connect(self.load_ledger)
-        client.busy.connect(
-            lambda busy: self.statusBar().showMessage(
-                "正在处理…" if busy else "就绪 · 所有金额均为人民币"
-            )
-        )
+        self.statusBar().showMessage("就绪 · 所有金额均为人民币")
+        client.busy.connect(self.show_busy)
         self.refresh()
 
-    def button(self, label, callback, layout):
-        button = QPushButton(label)
-        button.clicked.connect(callback)
+    # ------------------------------------------------------------------ shell
+
+    def build_header(self):
+        header = QFrame()
+        header.setObjectName("header")
+        header.setFixedHeight(64)
+        row = QHBoxLayout(header)
+        row.setContentsMargins(26, 0, 20, 0)
+        row.setSpacing(10)
+        brand = QLabel("同账")
+        brand.setObjectName("brand")
+        row.addWidget(brand)
+        tagline = QLabel("多人共享记账")
+        tagline.setObjectName("brandTag")
+        row.addWidget(tagline)
+        row.addStretch()
+        self.button("刷新", self.refresh, row, ghost=True)
+        self.ledgers = QComboBox()
+        self.ledgers.setMinimumWidth(210)
+        self.ledgers.setMaximumWidth(300)
+        self.ledgers.setFixedHeight(36)
+        row.addWidget(self.ledgers)
+        self.create_button = self.button("新建账本", self.create_ledger, row)
+        divider = QFrame()
+        divider.setObjectName("divider")
+        divider.setFixedHeight(26)
+        row.addWidget(divider)
+        self.identity = QLabel()
+        self.identity.setObjectName("identity")
+        self.identity.setFixedHeight(26)
+        row.addWidget(self.identity)
+        self.button("切换账号", self.switch_user, row, ghost=True)
+        return header
+
+    def button(self, text, callback, layout, primary=False, danger=False, ghost=False):
+        button = new_button(text, callback, primary, danger, ghost)
         layout.addWidget(button)
         return button
 
     def page(self, name):
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 14, 0, 0)
+        layout.setSpacing(12)
         self.tabs.addTab(widget, name)
         return layout
+
+    def show_busy(self, busy):
+        if busy:
+            self.statusBar().showMessage("正在处理…")
+        else:
+            self.statusBar().showMessage("就绪 · 所有金额均为人民币")
 
     @property
     def ledger_id(self):
         return self.ledgers.currentData()
 
+    def notice(self, label, text):
+        label.setText(text)
+        label.setVisible(bool(text))
+
+    # ----------------------------------------------------------------- entries
+
     def build_entries(self):
-        layout = self.page("收支与审核")
-        filters = QHBoxLayout()
+        layout = self.page("账目")
+        self.entry_notice = QLabel("")
+        self.entry_notice.setObjectName("notice")
+        self.entry_notice.setWordWrap(True)
+        self.entry_notice.setVisible(False)
+        layout.addWidget(self.entry_notice)
+
+        filters = Card()
+        row = QHBoxLayout()
+        row.setSpacing(8)
         self.status_filter = QComboBox()
+        self.status_filter.setMinimumWidth(150)
         self.status_filter.addItem("有效流程（隐藏撤回）", "")
         for key, label in STATUS.items():
             self.status_filter.addItem(label, key)
         self.status_filter.addItem("所有状态", "ALL")
-        self.start = QLineEdit()
-        self.start.setPlaceholderText("开始 YYYY-MM-DD")
-        self.end = QLineEdit()
-        self.end.setPlaceholderText("结束 YYYY-MM-DD")
-        self.minimum = QLineEdit()
-        self.minimum.setPlaceholderText("最低金额")
-        self.maximum = QLineEdit()
-        self.maximum.setPlaceholderText("最高金额")
-        for widget in (self.status_filter, self.start, self.end, self.minimum, self.maximum):
-            filters.addWidget(widget)
-        self.button("查询", self.load_entries, filters)
-        layout.addLayout(filters)
-        second = QHBoxLayout()
         self.category_filter = QComboBox()
+        self.category_filter.setMinimumWidth(110)
         self.member_filter = QComboBox()
-        second.addWidget(self.category_filter)
-        second.addWidget(self.member_filter)
-        self.button("新增收支", self.new_entry, second)
-        self.button("详情与历史", self.entry_detail, second)
-        self.button("驳回重交", lambda: self.edit_entry("resubmit"), second)
-        layout.addLayout(second)
+        self.member_filter.setMinimumWidth(110)
+        self.start = date_field(allow_empty=True)
+        self.end = date_field(allow_empty=True)
+        row.addWidget(self.status_filter)
+        row.addWidget(self.category_filter)
+        row.addWidget(self.member_filter)
+        row.addSpacing(4)
+        row.addWidget(self.muted("日期"))
+        row.addWidget(self.start)
+        row.addWidget(self.muted("至"))
+        row.addWidget(self.end)
+        row.addStretch()
+        row.addWidget(new_button("重置", self.reset_filters, ghost=True))
+        row.addWidget(new_button("查询", self.load_entries))
+        self.more_button = new_button("更多筛选", self.toggle_filters, ghost=True)
+        row.addWidget(self.more_button)
+        filters.add_layout(row)
+        self.extra_filters = QWidget()
+        extra = QHBoxLayout(self.extra_filters)
+        extra.setContentsMargins(0, 0, 0, 0)
+        extra.setSpacing(8)
+        self.minimum = QLineEdit()
+        self.minimum.setPlaceholderText("最低金额（元）")
+        self.minimum.setMaximumWidth(180)
+        self.maximum = QLineEdit()
+        self.maximum.setPlaceholderText("最高金额（元）")
+        self.maximum.setMaximumWidth(180)
+        extra.addWidget(self.minimum)
+        extra.addWidget(self.maximum)
+        extra.addStretch()
+        self.extra_filters.setVisible(False)
+        filters.add(self.extra_filters)
+        layout.addWidget(filters)
+
+        self.entry_card = Card("账目明细")
+        self.new_button = self.entry_card.add_button("新增账目", self.new_entry, primary=True)
         self.entry_table = table(
-            ["日期", "方向", "金额（元）", "类别", "提交人", "状态", "版本", "备注"]
+            ["日期", "方向", "金额", "类别", "提交人", "状态", "备注"],
+            widths=[100, 70, 120, 100, 90, 80, 0],
+            aligns=[None, None, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter],
         )
+        self.entry_table.itemSelectionChanged.connect(self.selection_changed)
         self.entry_table.doubleClicked.connect(self.entry_detail)
-        layout.addWidget(self.entry_table)
-        actions = QHBoxLayout()
-        self.management_buttons = []
-        for label, action in [("审核通过", "approve"), ("驳回", "reject"), ("撤回", "withdraw")]:
-            self.management_buttons.append(
-                self.button(label, lambda checked=False, a=action: self.entry_action(a), actions)
-            )
-        self.management_buttons.append(
-            self.button("修改待审", lambda: self.edit_entry("edit"), actions)
+        self.entry_card.add(self.entry_table, 1)
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        self.entry_count = self.muted("共 0 笔")
+        self.entry_hint = self.muted("")
+        footer.addWidget(self.entry_count)
+        footer.addWidget(self.entry_hint)
+        footer.addStretch()
+        self.detail_button = new_button("详情", self.entry_detail)
+        self.edit_button = new_button("修改", self.edit_entry)
+        self.withdraw_button = new_button(
+            "撤回", lambda: self.entry_action("withdraw"), danger=True
         )
-        self.management_buttons.append(
-            self.button("更正已审核", lambda: self.edit_entry("correct"), actions)
+        self.reject_button = new_button("驳回", lambda: self.entry_action("reject"), danger=True)
+        self.approve_button = new_button(
+            "审核通过", lambda: self.entry_action("approve"), primary=True
         )
-        actions.addStretch()
-        layout.addLayout(actions)
+        for widget in (
+            self.detail_button,
+            self.edit_button,
+            self.withdraw_button,
+            self.reject_button,
+            self.approve_button,
+        ):
+            footer.addWidget(widget)
+        self.entry_card.add_layout(footer)
+        layout.addWidget(self.entry_card, 1)
+        self.refresh_entry_actions()
+
+    def muted(self, text):
+        label = QLabel(text)
+        label.setObjectName("muted")
+        return label
+
+    def toggle_filters(self):
+        visible = not self.extra_filters.isVisible()
+        self.extra_filters.setVisible(visible)
+        self.more_button.setText("收起筛选" if visible else "更多筛选")
+
+    def reset_filters(self):
+        self.status_filter.setCurrentIndex(0)
+        self.category_filter.setCurrentIndex(0)
+        self.member_filter.setCurrentIndex(0)
+        self.start.setDate(self.start.minimumDate())
+        self.end.setDate(self.end.minimumDate())
+        self.minimum.clear()
+        self.maximum.clear()
+        self.load_entries()
+
+    # --------------------------------------------------------------- members
 
     def build_members(self):
-        layout = self.page("成员与邀请")
-        bar = QHBoxLayout()
+        layout = self.page("成员")
+        self.member_notice = QLabel("")
+        self.member_notice.setObjectName("notice")
+        self.member_notice.setWordWrap(True)
+        self.member_notice.setVisible(False)
+        layout.addWidget(self.member_notice)
+        invite = Card("邀请成员", "受邀人确认后加入账本，邀请七天内有效。")
+        row = QHBoxLayout()
+        row.setSpacing(8)
         self.people = QComboBox()
-        bar.addWidget(self.people)
-        self.button("邀请加入当前账本", self.invite, bar)
-        self.button("我的待处理邀请", self.my_invitations, bar)
-        self.button("查看账本邀请", self.ledger_invitations, bar)
-        layout.addLayout(bar)
-        self.member_table = table(["成员", "账号", "状态", "加入时间", "退出时间"])
-        layout.addWidget(self.member_table)
-        actions = QHBoxLayout()
-        self.button("自主退出", lambda: self.member_action("leave"), actions)
-        self.remove_button = self.button(
-            "移除选中成员", lambda: self.member_action("remove"), actions
+        self.people.setMinimumWidth(230)
+        row.addWidget(self.people)
+        self.invite_button = new_button("发送邀请", self.invite, primary=True)
+        row.addWidget(self.invite_button)
+        row.addStretch()
+        row.addWidget(new_button("邀请管理", self.invitation_manager))
+        invite.add_layout(row)
+        layout.addWidget(invite)
+        card = Card("成员列表")
+        self.member_table = table(
+            ["成员", "账号", "角色", "状态", "加入时间"], [0, 130, 120, 90, 160]
         )
-        self.transfer_button = self.button(
-            "设为账本管理员", lambda: self.member_action("transfer"), actions
+        self.member_table.itemSelectionChanged.connect(self.member_selection_changed)
+        card.add(self.member_table, 1)
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        footer.addWidget(new_button("自主退出", lambda: self.member_action("leave"), danger=True))
+        self.remove_button = new_button(
+            "移除成员", lambda: self.member_action("remove"), danger=True
         )
-        layout.addLayout(actions)
-        layout.addWidget(
-            QLabel(
-                "退出不删除历史。管理员须先由超级管理员完成移交；历史管理责任交给指定超级管理员。"
-            )
-        )
+        footer.addWidget(self.remove_button)
+        self.transfer_button = new_button("设为账本管理员", lambda: self.member_action("transfer"))
+        footer.addWidget(self.transfer_button)
+        footer.addStretch()
+        card.add_layout(footer)
+        hint = self.muted("退出或移除不删除历史记录；管理员须先由超级管理员完成移交。")
+        card.add(hint)
+        layout.addWidget(card, 1)
+        self.member_selection_changed()
+
+    def member_selection_changed(self):
+        selected = self.member_table.currentRow() >= 0
+        self.remove_button.setEnabled(selected)
+        self.transfer_button.setEnabled(selected and bool(self.state.get("user", {}).get("super")))
+
+    # --------------------------------------------------------------- finance
 
     def build_finance(self):
-        layout = self.page("预算 · 统计 · 结算")
-        bar = QHBoxLayout()
+        layout = self.page("财务")
+        bar = Card()
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(self.muted("统计区间"))
         today = date.today()
-        self.finance_start = QLineEdit(today.replace(day=1).isoformat())
-        self.finance_end = QLineEdit(today.isoformat())
-        bar.addWidget(QLabel("统计区间"))
-        bar.addWidget(self.finance_start)
-        bar.addWidget(self.finance_end)
-        self.button("计算", self.load_finance, bar)
-        self.button("保存结算快照", self.settle, bar)
-        layout.addLayout(bar)
-        self.summary = QLabel("请选择账本")
-        self.summary.setObjectName("summary")
-        layout.addWidget(self.summary)
-        split = QSplitter(Qt.Orientation.Horizontal)
-        self.category_stats = table(["类别", "收入", "支出"])
-        self.member_stats = table(["成员", "收入", "支出"])
-        split.addWidget(self.category_stats)
-        split.addWidget(self.member_stats)
-        layout.addWidget(split)
-        self.budget_table = table(["预算月份", "期初预算", "可用预算", "版本"])
-        self.snapshot_table = table(["创建时间", "区间", "收入", "支出", "状态"])
-        lower = QSplitter(Qt.Orientation.Horizontal)
-        lower.addWidget(self.budget_table)
-        lower.addWidget(self.snapshot_table)
-        layout.addWidget(lower)
-        actions = QHBoxLayout()
-        self.button("设置月度预算", self.budget, actions)
-        self.button("查看快照来源明细", self.snapshot_detail, actions)
-        layout.addLayout(actions)
+        self.finance_start = date_field(today.replace(day=1).isoformat())
+        self.finance_end = date_field(today.isoformat())
+        row.addWidget(self.finance_start)
+        row.addWidget(self.muted("至"))
+        row.addWidget(self.finance_end)
+        row.addStretch()
+        row.addWidget(new_button("计算", self.load_finance))
+        row.addWidget(new_button("保存结算快照", self.settle, primary=True))
+        bar.add_layout(row)
+        layout.addWidget(bar)
+
+        stats = QHBoxLayout()
+        stats.setSpacing(12)
+        self.stat_income = StatCard("本期收入")
+        self.stat_expense = StatCard("本期支出")
+        self.stat_profit = StatCard("本期盈亏")
+        self.stat_budget = StatCard("本月可用预算")
+        for card in (self.stat_income, self.stat_expense, self.stat_profit, self.stat_budget):
+            stats.addWidget(card, 1)
+        layout.addLayout(stats)
+
+        upper = QHBoxLayout()
+        upper.setSpacing(12)
+        category_card = Card("类别统计")
+        self.category_stats = table(["类别", "收入", "支出"], [0, 140, 140])
+        category_card.add(self.category_stats, 1)
+        upper.addWidget(category_card, 1)
+        member_card = Card("成员统计")
+        self.member_stats = table(["成员", "收入", "支出"], [0, 140, 140])
+        member_card.add(self.member_stats, 1)
+        upper.addWidget(member_card, 1)
+        layout.addLayout(upper, 1)
+
+        lower = QHBoxLayout()
+        lower.setSpacing(12)
+        budget_card = Card("月度预算")
+        budget_card.add_button("设置预算", self.budget)
+        self.budget_table = table(["月份", "期初预算", "可用预算", "版本"], [0, 120, 120, 60])
+        budget_card.add(self.budget_table, 1)
+        lower.addWidget(budget_card, 1)
+        snapshot_card = Card("结算快照")
+        snapshot_card.add_button("查看来源", self.snapshot_detail)
+        self.snapshot_table = table(
+            ["保存时间", "统计区间", "收入", "支出", "状态"], [140, 0, 80, 80, 95]
+        )
+        snapshot_card.add(self.snapshot_table, 1)
+        lower.addWidget(snapshot_card, 1)
+        layout.addLayout(lower, 1)
         layout.addWidget(
-            QLabel(
-                "仅已审核记录计入；结算保存历史，不清零、不锁账、不转账。可用预算为负时提示超预算。"
+            self.muted(
+                "仅已审核记录计入；可用预算＝期初预算＋收入－支出；结算只保存历史，不清零、不锁账。"
             )
         )
 
+    # ------------------------------------------------------------------ audit
+
     def build_audit(self):
-        layout = self.page("操作日志")
-        bar = QHBoxLayout()
+        layout = self.page("日志")
+        card = Card("操作日志", "时间已转换为北京时间")
         self.log_filter = QLineEdit()
-        self.log_filter.setPlaceholderText("筛选操作者、动作、目标或时间")
+        self.log_filter.setPlaceholderText("筛选操作者、动作或对象")
+        self.log_filter.setMinimumWidth(240)
         self.log_filter.textChanged.connect(self.show_logs)
-        bar.addWidget(self.log_filter)
-        self.button("刷新日志", self.load_logs, bar)
-        self.button("查看变更前后值", self.log_detail, bar)
-        layout.addLayout(bar)
-        self.log_table = table(["时间（UTC）", "操作者", "动作", "目标"])
-        layout.addWidget(self.log_table)
+        card.head.insertWidget(2, self.log_filter)
+        card.add_button("刷新日志", self.load_logs)
+        card.add_button("查看详情", self.log_detail)
+        self.log_table = table(["时间", "操作者", "动作", "对象"], [160, 120, 130, 0])
+        card.add(self.log_table, 1)
+        layout.addWidget(card, 1)
+
+    # ------------------------------------------------------------------ state
 
     def refresh(self):
         self.client.request("GET", "/bootstrap", self.bootstrapped)
@@ -229,11 +412,12 @@ class Window(QMainWindow):
     def bootstrapped(self, data):
         previous = self.ledger_id
         self.state = data
-        self.identity.setText(
-            data["user"]["name"] + (" · 超级管理员" if data["user"]["super"] else "")
-        )
+        self.user_id = data["user"]["id"]
+        name = data["user"]["name"]
+        if data["user"]["super"] and name != "超级管理员":
+            name += " · 超级管理员"
+        self.identity.setText(name)
         self.create_button.setEnabled(bool(data["user"]["super"] or data["user"]["creator"]))
-        self.transfer_button.setEnabled(bool(data["user"]["super"]))
         self.ledgers.blockSignals(True)
         self.ledgers.clear()
         for item in data["ledgers"]:
@@ -241,27 +425,43 @@ class Window(QMainWindow):
         if self.ledgers.findData(previous) >= 0:
             self.ledgers.setCurrentIndex(self.ledgers.findData(previous))
         self.ledgers.blockSignals(False)
-        self.people.clear()
-        for person in data["users"]:
-            self.people.addItem(f"{person['name']} ({person['username']})", person["id"])
+        pending = len(data.get("invitations", []))
+        self.notice(
+            self.member_notice,
+            f"你有 {pending} 条待处理邀请，可在「邀请管理」中接受。" if pending else "",
+        )
         self.load_ledger()
         if not data["ledgers"]:
-            self.statusBar().showMessage(
-                "尚未加入账本：管理员可创建；成员可从“我的待处理邀请”接受邀请。"
+            self.notice(
+                self.entry_notice,
+                "尚未加入账本。有建账资格的用户可在右上角「新建账本」；"
+                "受邀成员可在「成员 → 邀请管理」中接受邀请。",
             )
 
-    def load_ledger(self):
+    def clear_views(self):
         self.entries = []
         self.context_data = {}
-        fill(self.entry_table, [])
-        fill(self.member_table, [])
-        fill(self.category_stats, [])
-        fill(self.member_stats, [])
-        fill(self.budget_table, [])
-        fill(self.snapshot_table, [])
-        fill(self.log_table, [])
+        for widget in (
+            self.entry_table,
+            self.member_table,
+            self.category_stats,
+            self.member_stats,
+            self.budget_table,
+            self.snapshot_table,
+            self.log_table,
+        ):
+            fill(widget, [])
+        self.entry_count.setText("共 0 笔")
+        self.entry_hint.setText("")
+        for card in (self.stat_income, self.stat_expense, self.stat_profit, self.stat_budget):
+            card.show_value("—", MUTED)
+        self.people.clear()
+
+    def load_ledger(self):
+        self.clear_views()
         for index in (2, 3):
             self.tabs.setTabEnabled(index, False)
+        self.notice(self.entry_notice, "")
         if self.ledger_id:
             expected = self.ledger_id
             self.client.request(
@@ -269,46 +469,65 @@ class Window(QMainWindow):
                 f"/ledgers/{expected}/context",
                 lambda data: self.got_context(data) if expected == self.ledger_id else None,
             )
+        else:
+            self.refresh_entry_actions()
 
     def got_context(self, data):
         self.context_data = data
-        for button in self.management_buttons + [self.remove_button]:
-            button.setEnabled(data["manager"])
-        self.tabs.setTabEnabled(2, data["manager"])
-        self.tabs.setTabEnabled(3, data["manager"])
-        self.category_filter.clear()
+        manager = bool(data["manager"])
+        self.tabs.setTabEnabled(2, manager)
+        self.tabs.setTabEnabled(3, manager)
+        for combo in (self.category_filter, self.member_filter):
+            combo.blockSignals(True)
+            combo.clear()
         self.category_filter.addItem("全部类别", "")
         for category in data["categories"]:
             self.category_filter.addItem(category["name"], category["id"])
-        self.member_filter.clear()
         self.member_filter.addItem("全部成员", "")
         for member in data["members"]:
             self.member_filter.addItem(member["name"], member["user_id"])
+        for combo in (self.category_filter, self.member_filter):
+            combo.blockSignals(False)
         fill(
             self.member_table,
             [
                 [
                     m["name"],
                     m["username"],
+                    Cell(
+                        "账本管理员" if m["user_id"] == data["ledger"]["admin_id"] else "成员",
+                        ACCENT if m["user_id"] == data["ledger"]["admin_id"] else INK,
+                    ),
                     "在账本" if m["active"] else "已退出",
-                    m["joined"][:19],
-                    (m["left_at"] or "")[:19],
+                    beijing(m["joined"]),
                 ]
                 for m in data["members"]
             ],
         )
+        self.fill_people(data["members"])
         self.load_entries()
-        if data["manager"]:
+        self.refresh_entry_actions()
+        if manager:
             self.load_finance()
             self.load_logs()
+
+    def fill_people(self, members):
+        active = {m["user_id"] for m in members if m["active"]}
+        self.people.clear()
+        for person in self.state.get("users", []):
+            if person["id"] not in active:
+                self.people.addItem(f"{person['name']}（{person['username']}）", person["id"])
+        self.invite_button.setEnabled(self.people.count() > 0 and bool(self.ledger_id))
+
+    # ---------------------------------------------------------------- entries
 
     def load_entries(self):
         if not self.ledger_id:
             return
         params = {
             "status": self.status_filter.currentData(),
-            "start": self.start.text(),
-            "end": self.end.text(),
+            "start": date_text(self.start),
+            "end": date_text(self.end),
             "minimum": self.minimum.text(),
             "maximum": self.maximum.text(),
             "category_id": self.category_filter.currentData(),
@@ -324,51 +543,110 @@ class Window(QMainWindow):
 
     def got_entries(self, data):
         self.entries = data
-        fill(
-            self.entry_table,
-            [
+        rows = []
+        for item in data:
+            income = item["direction"] == "INCOME"
+            color = INCOME if income else INK
+            rows.append(
                 [
-                    e["occurred"],
-                    "收入" if e["direction"] == "INCOME" else "支出",
-                    currency(e["amount"]),
-                    e["category"],
-                    e["submitter"],
-                    STATUS[e["status"]],
-                    e["version"],
-                    e["note"],
+                    item["occurred"],
+                    Cell(direction_label(item["direction"]), INCOME if income else EXPENSE),
+                    Cell(
+                        ("+" if income else "-") + yuan(item["amount"]),
+                        color,
+                        bold=True,
+                        align=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    ),
+                    item["category"],
+                    item["submitter"],
+                    Cell(STATUS[item["status"]], STATUS_COLORS[item["status"]]),
+                    item["note"],
                 ]
-                for e in data
-            ],
-        )
+            )
+        fill(self.entry_table, rows)
+        self.entry_count.setText(f"共 {len(data)} 笔")
+        self.refresh_entry_actions()
 
-    def selected_entry(self):
+    def selected_entry(self, quiet=False):
         index = self.entry_table.currentRow()
         if index < 0 or index >= len(self.entries):
-            QMessageBox.information(self, "选择记录", "请先选择一条账目。")
+            if not quiet:
+                QMessageBox.information(self, "选择记录", "请先选择一条账目。")
             return None
         return self.entries[index]
+
+    def selection_changed(self):
+        self.refresh_entry_actions()
+
+    def refresh_entry_actions(self):
+        item = self.selected_entry(quiet=True)
+        manager = bool(self.context_data.get("manager"))
+        me = self.user_id
+        approve = reject = withdraw = edit = detail = False
+        self.pending_action = None
+        hint = "选择一条记录后可查看详情或执行操作。"
+        if item:
+            detail = True
+            status = item["status"]
+            own = me in (item["submitter_id"], item["editor_id"])
+            if status == "PENDING":
+                approve = reject = manager and not own
+                withdraw = manager
+                edit = manager
+                self.pending_action = "edit" if edit else None
+                hint = "待审核：可通过、驳回，或由管理员修改后重新提交。"
+                if manager and own:
+                    hint = "待审核：本人提交的记录不能自行审核，可由另一位管理员处理。"
+            elif status == "APPROVED":
+                withdraw = manager
+                edit = manager
+                self.pending_action = "correct" if edit else None
+                hint = "已审核：更正会撤回原记录并生成一条待审核新记录。"
+            elif status == "REJECTED":
+                edit = me in (item["submitter_id"], item["custodian_id"])
+                self.pending_action = "resubmit" if edit else None
+                hint = "已驳回：原提交人可修改后重新提交。"
+            elif status == "WITHDRAWN":
+                hint = "已撤回：终态记录，仅可查看详情。"
+        self.detail_button.setEnabled(detail)
+        self.edit_button.setEnabled(edit)
+        self.edit_button.setText(EDIT_LABELS.get(self.pending_action, "修改"))
+        self.withdraw_button.setEnabled(withdraw)
+        self.reject_button.setEnabled(reject)
+        self.approve_button.setEnabled(approve)
+        self.entry_hint.setText(hint)
 
     def new_entry(self):
         if not self.context_data:
             return
-        EntryDialog(self.client, self.ledger_id, self.context_data, self.load_ledger, self).exec()
+        EntryDialog(
+            self.client,
+            self.ledger_id,
+            self.context_data,
+            self.load_ledger,
+            self,
+            user_id=self.user_id,
+        ).exec()
 
-    def edit_entry(self, action):
+    def edit_entry(self):
         item = self.selected_entry()
-        if item:
-            self.client.request(
-                "GET",
-                "/entries/" + item["id"],
-                lambda detail: EntryDialog(
-                    self.client,
-                    self.ledger_id,
-                    self.context_data,
-                    self.load_ledger,
-                    self,
-                    detail,
-                    action,
-                ).exec(),
-            )
+        if not item or not self.pending_action:
+            return
+        action = self.pending_action
+        self.client.request(
+            "GET",
+            "/entries/" + item["id"],
+            lambda detail: EntryDialog(
+                self.client,
+                self.ledger_id,
+                self.context_data,
+                self.load_ledger,
+                self,
+                detail,
+                action,
+                user_id=self.user_id,
+            ).exec(),
+        )
 
     def entry_detail(self, *args):
         item = self.selected_entry()
@@ -376,7 +654,7 @@ class Window(QMainWindow):
             self.client.request(
                 "GET",
                 "/entries/" + item["id"],
-                lambda data: show_json(self, "账目详情与历史（金额单位：分）", data),
+                lambda data: EntryDetailDialog(self, data).exec(),
             )
 
     def entry_action(self, action):
@@ -385,10 +663,17 @@ class Window(QMainWindow):
             return
         reason = ""
         if action != "approve":
-            reason, ok = QInputDialog.getText(self, "填写原因", "操作原因：")
-            if not ok:
+            reason = TextPrompt.ask(
+                self,
+                "填写原因",
+                {"withdraw": "撤回原因", "reject": "驳回原因"}.get(action, "操作原因"),
+                placeholder="请简要说明原因",
+            )
+            if reason is None:
                 return
-        if not confirm(self, f"确认对 {currency(item['amount'])} 元的记录执行此操作？"):
+        if not confirm(
+            self, f"确认对 {yuan(item['amount'])} 的记录执行「{ACTION_LABELS[action]}」？"
+        ):
             return
         self.client.request(
             "POST",
@@ -397,72 +682,36 @@ class Window(QMainWindow):
             {"action": action, "version": item["version"], "reason": reason},
         )
 
+    # ---------------------------------------------------------------- members
+
     def create_ledger(self):
-        name, ok = QInputDialog.getText(self, "创建账本", "账本名称：")
-        if ok:
+        name = TextPrompt.ask(self, "新建账本", "账本名称", placeholder="例如：项目协作账本")
+        if name:
             self.client.request("POST", "/ledgers", lambda _: self.refresh(), {"name": name})
 
     def invite(self):
-        if self.ledger_id:
-            self.client.request(
-                "POST",
-                f"/ledgers/{self.ledger_id}/invite",
-                lambda _: QMessageBox.information(
-                    self, "邀请已发送", "请受邀人登录后在“我的待处理邀请”中确认。"
-                ),
-                {"target": self.people.currentData()},
-            )
-
-    def my_invitations(self):
-        def received(data):
-            invitations = data["invitations"]
-            if not invitations:
-                QMessageBox.information(self, "邀请", "暂无待处理邀请。")
-                return
-            labels = [
-                f"{i['ledger_name']} · 邀请人 {i['inviter']} · {i['id'][:8]}" for i in invitations
-            ]
-            chosen, ok = QInputDialog.getItem(
-                self, "接受邀请", "选择要加入的账本：", labels, 0, False
-            )
-            if ok:
-                self.client.request(
-                    "POST",
-                    "/invitations/" + invitations[labels.index(chosen)]["id"],
-                    lambda _: self.refresh(),
-                    {"action": "accept"},
-                )
-
-        self.client.request("GET", "/bootstrap", received)
-
-    def ledger_invitations(self):
-        if not self.ledger_id:
+        if not self.ledger_id or not self.people.currentData():
             return
+        target = self.people.currentData()
+        self.client.request(
+            "POST",
+            f"/ledgers/{self.ledger_id}/invite",
+            lambda _: self.invitation_sent(),
+            {"target": target},
+        )
 
-        def received(data):
-            pending = [i for i in data if i["status"] == "PENDING"]
-            if not pending:
-                QMessageBox.information(self, "邀请", "暂无可撤销邀请。")
-                return
-            labels = [f"{i['target']} · {i['expires'][:10]} · {i['id'][:8]}" for i in pending]
-            choice, ok = QInputDialog.getItem(
-                self, "账本邀请", "选择邀请以撤销：", labels, 0, False
-            )
-            if ok and confirm(self, "确认撤销邀请？"):
-                self.client.request(
-                    "POST",
-                    "/invitations/" + pending[labels.index(choice)]["id"],
-                    lambda _: self.refresh(),
-                    {"action": "cancel"},
-                )
+    def invitation_sent(self):
+        QMessageBox.information(self, "邀请已发送", "请受邀人登录后在「邀请管理」中确认加入。")
+        self.load_ledger()
 
-        self.client.request("GET", f"/ledgers/{self.ledger_id}/records/invitations", received)
+    def invitation_manager(self):
+        InvitationDialog(self.client, self.ledger_id, self.refresh, self).exec()
 
     def member_action(self, action):
         if not self.context_data:
             return
         if action == "leave":
-            target = self.state["user"]["id"]
+            target = self.user_id
         else:
             index = self.member_table.currentRow()
             if index < 0:
@@ -470,14 +719,9 @@ class Window(QMainWindow):
             target = self.context_data["members"][index]["user_id"]
         custodian = None
         if action != "transfer":
-            people = [u for u in self.state["users"] if u["super"]]
-            labels = [u["name"] for u in people]
-            chosen, ok = QInputDialog.getItem(
-                self, "历史接管", "选择超级管理员：", labels, 0, False
-            )
-            if not ok:
+            custodian = self.choose_custodian()
+            if custodian is None:
                 return
-            custodian = people[labels.index(chosen)]["id"]
         if confirm(self, "确认变更成员权限？变更立即生效，历史记录保留。"):
             self.client.request(
                 "POST",
@@ -486,15 +730,33 @@ class Window(QMainWindow):
                 {"target": target, "action": action, "custodian": custodian},
             )
 
+    def choose_custodian(self):
+        people = [user for user in self.state.get("users", []) if user["super"]]
+        if not people:
+            return None
+        if len(people) == 1:
+            return people[0]["id"]
+        options = [(f"{user['name']}（{user['username']}）", user["id"]) for user in people]
+        return ChoicePrompt.ask(
+            self,
+            "选择历史接管人",
+            "退出后历史记录仍归属原提交人，由所选超级管理员接管后续处理。",
+            options,
+        )
+
+    # ---------------------------------------------------------------- finance
+
     def load_finance(self):
         if not self.ledger_id:
             return
         expected = self.ledger_id
+        start = self.finance_start.date().toString("yyyy-MM-dd")
+        end = self.finance_end.date().toString("yyyy-MM-dd")
         self.client.request(
             "GET",
             f"/ledgers/{expected}/finance",
             lambda data: self.got_finance(data) if expected == self.ledger_id else None,
-            params={"start": self.finance_start.text(), "end": self.finance_end.text()},
+            params={"start": start, "end": end},
         )
         self.client.request(
             "GET",
@@ -503,89 +765,106 @@ class Window(QMainWindow):
         )
 
     def got_finance(self, data):
-        self.summary.setText(
-            f"收入  ¥{currency(data['income'])}     支出  ¥{currency(data['expense'])}     盈亏  ¥{currency(data['profit'])}"
-        )
+        self.stat_income.show_value(yuan(data["income"]), INCOME)
+        self.stat_expense.show_value(yuan(data["expense"]), EXPENSE)
+        self.stat_profit.show_value(yuan(data["profit"]), OK if data["profit"] >= 0 else DANGER)
+        month = date.today().strftime("%Y-%m")
+        budget = next((b for b in data["budgets"] if b["month"] == month), None)
+        if budget:
+            self.stat_budget.show_value(
+                yuan(budget["available"]), OK if budget["available"] >= 0 else DANGER
+            )
+        else:
+            self.stat_budget.show_value("未设置", MUTED)
         fill(
             self.category_stats,
             [
-                [name, currency(v["income"]), currency(v["expense"])]
-                for name, v in data["categories"].items()
+                [
+                    name,
+                    Cell(yuan(values["income"]), INCOME),
+                    Cell(yuan(values["expense"]), EXPENSE),
+                ]
+                for name, values in data["categories"].items()
             ],
         )
         fill(
             self.member_stats,
             [
-                [v["name"], currency(v["income"]), currency(v["expense"])]
-                for v in data["members"].values()
+                [
+                    values["name"],
+                    Cell(yuan(values["income"]), INCOME),
+                    Cell(yuan(values["expense"]), EXPENSE),
+                ]
+                for values in data["members"].values()
             ],
         )
         self.budgets = data["budgets"]
-        fill(
-            self.budget_table,
-            [
+        rows = []
+        for item in self.budgets:
+            available = item["available"]
+            rows.append(
                 [
-                    b["month"],
-                    currency(b["amount"]),
-                    currency(b["available"]) + (" ⚠ 超预算" if b["available"] < 0 else ""),
-                    b["version"],
+                    item["month"],
+                    yuan(item["amount"]),
+                    Cell(
+                        yuan(available) + ("  超预算" if available < 0 else ""),
+                        DANGER if available < 0 else OK,
+                    ),
+                    str(item["version"]),
                 ]
-                for b in self.budgets
-            ],
-        )
+            )
+        fill(self.budget_table, rows)
 
     def got_snapshots(self, data):
         self.snapshots = data
+
+        def span(item):
+            start, end = item["start"], item["end"]
+            if start[:4] == end[:4]:
+                return start[5:] + " ～ " + end[5:]
+            return start + " ～ " + end
+
         fill(
             self.snapshot_table,
             [
                 [
-                    s["created"][:19],
-                    s["start"] + " ～ " + s["end"],
-                    currency(s["income"]),
-                    currency(s["expense"]),
-                    "来源已变化" if s["stale"] else "当前",
+                    beijing(item["created"]),
+                    span(item),
+                    yuan(int(item["income"])),
+                    yuan(int(item["expense"])),
+                    Cell(
+                        "来源已变化" if item["stale"] else "当前",
+                        WARN if item["stale"] else OK,
+                    ),
                 ]
-                for s in data
+                for item in data
             ],
         )
 
     def budget(self):
-        month, ok = QInputDialog.getText(
-            self, "设置预算", "月份 YYYY-MM：", text=date.today().strftime("%Y-%m")
-        )
-        if not ok:
+        if not self.ledger_id:
             return
-        amount, ok = QInputDialog.getText(self, "设置预算", "期初预算（元）：")
-        if not ok:
-            return
-        reason, ok = QInputDialog.getText(self, "设置预算", "变更原因：")
-        if ok:
-            version = next((b["version"] for b in self.budgets if b["month"] == month), 0)
-            self.client.request(
-                "POST",
-                f"/ledgers/{self.ledger_id}/budget",
-                lambda _: self.load_finance(),
-                {"month": month, "amount": amount, "reason": reason, "version": version},
-            )
+        BudgetDialog(self.client, self.ledger_id, self.budgets, self.load_finance, self).exec()
 
     def settle(self):
         if self.ledger_id and confirm(self, "保存当前区间的结算快照？此操作不会清零或转账。"):
+            start = self.finance_start.date().toString("yyyy-MM-dd")
+            end = self.finance_end.date().toString("yyyy-MM-dd")
             self.client.request(
                 "POST",
                 f"/ledgers/{self.ledger_id}/settle",
                 lambda _: self.load_finance(),
-                {"start": self.finance_start.text(), "end": self.finance_end.text()},
+                {"start": start, "end": end},
             )
 
     def snapshot_detail(self):
         index = self.snapshot_table.currentRow()
-        if index >= 0 and index < len(self.snapshots):
-            import json
+        if index < 0 or index >= len(self.snapshots):
+            QMessageBox.information(self, "选择快照", "请先在列表中选择一份结算快照。")
+            return
+        SnapshotDialog(self, self.snapshots[index]).exec()
 
-            show_json(
-                self, "结算来源副本（金额单位：分）", json.loads(self.snapshots[index]["data"])
-            )
+    # ------------------------------------------------------------------ audit
 
     def load_logs(self):
         if self.ledger_id:
@@ -601,26 +880,35 @@ class Window(QMainWindow):
         self.show_logs()
 
     def show_logs(self):
-        query = self.log_filter.text().lower()
+        query = self.log_filter.text().strip().lower()
         self.filtered_logs = [
             item
             for item in self.logs
-            if query
-            in " ".join(str(item[k]) for k in ("actor", "action", "target", "created")).lower()
+            if not query
+            or query
+            in " ".join(str(item[key]) for key in ("actor", "action", "target", "created")).lower()
         ]
         fill(
             self.log_table,
-            [[i["created"][:19], i["actor"], i["action"], i["target"]] for i in self.filtered_logs],
+            [
+                [
+                    beijing(item["created"]),
+                    item["actor"],
+                    action_label(item["action"]),
+                    short_id(item["target"]),
+                ]
+                for item in self.filtered_logs
+            ],
         )
 
     def log_detail(self):
         index = self.log_table.currentRow()
-        if index >= 0 and index < len(self.filtered_logs):
-            import json
+        if index < 0 or index >= len(self.filtered_logs):
+            QMessageBox.information(self, "选择日志", "请先选择一条操作日志。")
+            return
+        LogDetailDialog(self, self.filtered_logs[index]).exec()
 
-            item = dict(self.filtered_logs[index])
-            item["data"] = json.loads(item["data"])
-            show_json(self, "只读操作日志", item)
+    # ------------------------------------------------------------------ login
 
     def switch_user(self):
         if not confirm(self, "退出当前账号并切换登录？"):
@@ -631,6 +919,7 @@ class Window(QMainWindow):
             self.hide()
             login = LoginDialog(self.client, self)
             if login.exec() == QDialog.DialogCode.Accepted:
+                self.clear_views()
                 self.refresh()
                 self.show()
             else:
@@ -639,39 +928,13 @@ class Window(QMainWindow):
         self.client.request("POST", "/logout", logged_out)
 
 
-def configure_fonts(app):
-    from pathlib import Path
-    from PySide6.QtGui import QFontDatabase, QFont, QPalette, QColor
-
-    app.setStyle("Fusion")
-    palette = app.palette()
-    for role, color in (
-        (QPalette.ColorRole.Window, "#f3f6f5"),
-        (QPalette.ColorRole.WindowText, "#203b36"),
-        (QPalette.ColorRole.Base, "#ffffff"),
-        (QPalette.ColorRole.AlternateBase, "#f1f7f4"),
-        (QPalette.ColorRole.Text, "#203b36"),
-        (QPalette.ColorRole.Button, "#e3ede8"),
-        (QPalette.ColorRole.ButtonText, "#203b36"),
-    ):
-        palette.setColor(role, QColor(color))
-    app.setPalette(palette)
-    font = Path("C:/Windows/Fonts/msyh.ttc")
-    if font.exists():
-        font_id = QFontDatabase.addApplicationFont(str(font))
-        families = QFontDatabase.applicationFontFamilies(font_id)
-        if families:
-            app.setFont(QFont(families[0], 10))
-
-
 def main():
     app = QApplication(sys.argv)
     configure_fonts(app)
+    app.setStyleSheet(STYLE)
     from PySide6.QtCore import QThreadPool
 
     app.aboutToQuit.connect(lambda: QThreadPool.globalInstance().waitForDone())
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
     client = Client()
     client.error.connect(
         lambda message: QMessageBox.warning(QApplication.activeWindow(), "操作未完成", message)

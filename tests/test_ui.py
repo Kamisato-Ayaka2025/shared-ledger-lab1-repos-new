@@ -1,5 +1,15 @@
-from tongzhang.widgets import Client, LoginDialog, currency
 from tongzhang.forms import EntryDialog
+from tongzhang.widgets import Client, LoginDialog, currency
+
+
+def context():
+    return {
+        "members": [
+            {"active": 1, "user_id": "u1", "name": "成员"},
+            {"active": 1, "user_id": "u2", "name": "同事"},
+        ],
+        "categories": [{"direction": "EXPENSE", "id": "c", "name": "餐饮"}],
+    }
 
 
 def test_login_controls(qtbot):
@@ -11,19 +21,34 @@ def test_login_controls(qtbot):
 
 
 def test_entry_keeps_inputs_on_missing_allocation(qtbot):
-    client = Client()
-    context = {
-        "members": [{"active": 1, "user_id": "u", "name": "成员"}],
-        "categories": [{"direction": "EXPENSE", "id": "c", "name": "餐饮"}],
-    }
-    dialog = EntryDialog(client, "ledger", context, lambda: None)
+    dialog = EntryDialog(Client(), "ledger", context(), lambda: None, user_id="u1")
     qtbot.addWidget(dialog)
     dialog.amount.setText("100.00")
-    dialog.note.setPlainText("有效输入")
+    dialog.note.setText("有效输入")
     dialog.save()
     assert dialog.amount.text() == "100.00"
-    assert dialog.note.toPlainText() == "有效输入"
+    assert dialog.note.text() == "有效输入"
     assert "至少" in dialog.error.text()
+
+
+def test_entry_allocation_helpers_add_up(qtbot):
+    dialog = EntryDialog(Client(), "ledger", context(), lambda: None, user_id="u1")
+    qtbot.addWidget(dialog)
+    dialog.amount.setText("100.00")
+    dialog.split_evenly()
+    assert dialog.allocation_total() == 10000
+    dialog.all_to_me()
+    assert dialog.allocation_total() == 10000
+    assert dialog.allocations.item(0, 1).text() == "100.00"
+
+
+def test_entry_blocks_uneven_allocation(qtbot):
+    dialog = EntryDialog(Client(), "ledger", context(), lambda: None, user_id="u1")
+    qtbot.addWidget(dialog)
+    dialog.amount.setText("100.00")
+    dialog.allocations.item(0, 1).setText("60")
+    dialog.save()
+    assert "合计" in dialog.error.text()
 
 
 def test_unauthenticated_client_omits_authorization_header(qtbot, monkeypatch):
@@ -46,8 +71,9 @@ def test_unauthenticated_client_omits_authorization_header(qtbot, monkeypatch):
 
 def test_application_uses_readable_light_palette(qapp):
     from PySide6.QtGui import QPalette
+
     from tongzhang.desktop import configure_fonts
 
     configure_fonts(qapp)
-    assert qapp.palette().color(QPalette.ColorRole.Window).name() == "#f3f6f5"
-    assert qapp.palette().color(QPalette.ColorRole.WindowText).name() == "#203b36"
+    assert qapp.palette().color(QPalette.ColorRole.Window).name() == "#f2f5f4"
+    assert qapp.palette().color(QPalette.ColorRole.WindowText).name() == "#1f2d2a"

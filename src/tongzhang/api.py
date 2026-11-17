@@ -147,7 +147,7 @@ def main():
     import uvicorn
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("TONGZHANG_PORT", "8765")))
     parser.add_argument("--database")
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()

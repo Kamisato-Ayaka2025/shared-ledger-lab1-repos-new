@@ -10,16 +10,17 @@ import time
 import httpx
 
 root = Path(__file__).resolve().parents[1]
-exe = root / "dist/Tongzhang/Tongzhang.exe"
+exe = Path(os.environ.get("TONGZHANG_EXE", root / "dist/Tongzhang/Tongzhang.exe"))
 output = root.parent / "HW/HW3/检查" / ("EXE完整验收-" + time.strftime("%Y%m%d-%H%M%S"))
-output.mkdir(parents=True)
-env = dict(os.environ, LOCALAPPDATA=str(output / "data"))
+port = int(os.environ.get("TONGZHANG_PORT", "8765"))
+base = "http://127.0.0.1:" + str(port)
+env = dict(os.environ, LOCALAPPDATA=str(output / "data"), TONGZHANG_PORT=str(port))
 env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
 for key in ("PYTHONPATH", "PYTHONHOME", "QT_QPA_PLATFORM", "QT_PLUGIN_PATH"):
     env.pop(key, None)
 with socket.socket() as probe:
-    assert probe.connect_ex(("127.0.0.1", 8765)) != 0, (
-        "Port 8765 occupied: refuse to touch another database"
+    assert probe.connect_ex(("127.0.0.1", port)) != 0, (
+        f"Port {port} occupied: refuse to touch another database"
     )
 server = None
 client = None
@@ -32,10 +33,7 @@ def start_server():
     for _ in range(80):
         assert process.poll() is None, "server exited"
         try:
-            if (
-                httpx.get("http://127.0.0.1:8765/health", timeout=0.5, trust_env=False).status_code
-                == 200
-            ):
+            if httpx.get(base + "/health", timeout=0.5, trust_env=False).status_code == 200:
                 return process
         except httpx.HTTPError:
             pass
