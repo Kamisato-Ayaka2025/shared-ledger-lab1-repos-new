@@ -9,6 +9,16 @@ import httpx
 
 
 def launch():
+    if "--e2e-resume" in sys.argv:
+        from e2e_driver import main
+
+        main(sys.argv[sys.argv.index("--e2e-resume") + 1], resume=True)
+        return
+    if "--e2e-ui" in sys.argv:
+        from e2e_driver import main
+
+        main(sys.argv[sys.argv.index("--e2e-ui") + 1])
+        return
     if "--smoke-ui" in sys.argv:
         from PySide6.QtWidgets import QApplication
         from tongzhang.widgets import Client, LoginDialog

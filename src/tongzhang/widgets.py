@@ -37,7 +37,7 @@ class RequestTask(QRunnable):
                 self.url,
                 json=self.body,
                 params=self.params,
-                headers={"Authorization": "Bearer " + self.token},
+                headers={"Authorization": "Bearer " + self.token} if self.token else {},
                 timeout=15,
             )
             data = response.json()

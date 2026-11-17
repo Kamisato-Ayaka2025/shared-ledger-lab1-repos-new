@@ -641,8 +641,21 @@ class Window(QMainWindow):
 
 def configure_fonts(app):
     from pathlib import Path
-    from PySide6.QtGui import QFontDatabase, QFont
+    from PySide6.QtGui import QFontDatabase, QFont, QPalette, QColor
 
+    app.setStyle("Fusion")
+    palette = app.palette()
+    for role, color in (
+        (QPalette.ColorRole.Window, "#f3f6f5"),
+        (QPalette.ColorRole.WindowText, "#203b36"),
+        (QPalette.ColorRole.Base, "#ffffff"),
+        (QPalette.ColorRole.AlternateBase, "#f1f7f4"),
+        (QPalette.ColorRole.Text, "#203b36"),
+        (QPalette.ColorRole.Button, "#e3ede8"),
+        (QPalette.ColorRole.ButtonText, "#203b36"),
+    ):
+        palette.setColor(role, QColor(color))
+    app.setPalette(palette)
     font = Path("C:/Windows/Fonts/msyh.ttc")
     if font.exists():
         font_id = QFontDatabase.addApplicationFont(str(font))

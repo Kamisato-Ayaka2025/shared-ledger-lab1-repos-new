@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = ['tongzhang.api', 'tongzhang.desktop']
+hiddenimports = ['tongzhang.api', 'tongzhang.desktop', 'e2e_driver']
 hiddenimports += collect_submodules('uvicorn')
 
 
