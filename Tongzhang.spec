@@ -18,6 +18,8 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Qt uses Windows ICU exports without version suffixes. Do not bundle a PATH ICU.
+a.binaries = [item for item in a.binaries if item[0].lower() != "icuuc.dll"]
 pyz = PYZ(a.pure)
 
 exe = EXE(

@@ -9,6 +9,21 @@ import httpx
 
 
 def launch():
+    if "--smoke-ui" in sys.argv:
+        from PySide6.QtWidgets import QApplication
+        from tongzhang.widgets import Client, LoginDialog
+        from tongzhang.desktop import configure_fonts, STYLE
+
+        app = QApplication([])
+        configure_fonts(app)
+        app.setStyleSheet(STYLE)
+        dialog = LoginDialog(Client())
+        dialog.show()
+        app.processEvents()
+        target = Path(sys.argv[sys.argv.index("--smoke-ui") + 1])
+        dialog.grab().save(str(target))
+        dialog.close()
+        return
     if "--server" in sys.argv:
         from tongzhang.api import create_app
         import uvicorn
