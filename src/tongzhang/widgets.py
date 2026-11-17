@@ -587,6 +587,9 @@ def confirm(parent, message):
 
 
 def configure_fonts(app):
+    from .branding import configure_identity
+
+    configure_identity(app)
     from pathlib import Path
 
     from PySide6.QtGui import QFont, QFontDatabase, QPalette

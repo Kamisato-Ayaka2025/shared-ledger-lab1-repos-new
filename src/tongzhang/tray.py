@@ -1,7 +1,8 @@
 """System tray keeps the desktop reachable after closing its window."""
 
 from PySide6.QtCore import QObject, QEvent
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap, QFont
+from PySide6.QtGui import QAction
+from .branding import application_icon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 
@@ -12,14 +13,7 @@ class TrayController(QObject):
         self.quitting = False
         self.notified = False
         self.quit_callback = quit_callback or QApplication.instance().quit
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(QColor("#187662"))
-        painter = QPainter(pixmap)
-        painter.setPen(QColor("white"))
-        painter.setFont(QFont("Microsoft YaHei", 32, QFont.Weight.Bold))
-        painter.drawText(pixmap.rect(), 0x84, "同")
-        painter.end()
-        self.tray = QSystemTrayIcon(QIcon(pixmap), self)
+        self.tray = QSystemTrayIcon(application_icon(), self)
         self.tray.setToolTip("同账 · 双击显示主窗口")
         self.menu = QMenu(window)
         self.show_action = QAction("显示主窗口", self)
