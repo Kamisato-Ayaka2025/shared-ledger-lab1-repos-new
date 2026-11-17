@@ -1,33 +1,50 @@
-# 同账代码运行说明
+# 同账 · 多人共享记账
 
-Python 3.12，Windows 64 位。规划、需求决策和验收记录位于工作区 `HW/HW3`。
+同账是一个 Windows 桌面记账应用，用于多人协作记录收支、审核账目和管理预算。当前为本地测试版，不接入真实支付。
 
-- 初始化：`pwsh -File scripts/setup.ps1`
-- 一键运行：`pwsh -File scripts/run.ps1`
-- 检查：`pwsh -File scripts/check.ps1`
-- 类型检查：`.venv/Scripts/python.exe -m mypy src/tongzhang --ignore-missing-imports`
-- 构建：`pwsh -File scripts/build.ps1`
-- 桌面 HTTP 烟测与截图：`.venv/Scripts/python.exe scripts/ui_smoke.py`
-- 未打包 Qt 流程回归：`.venv/Scripts/python.exe scripts/run_local_journey.py`
-- 可复现查询基准：`.venv/Scripts/python.exe scripts/benchmark.py`
+## 当前功能
 
-构建结果 `dist/Tongzhang/Tongzhang.exe` 自动启动本机服务，第二个客户端复用服务。
-演示账号 `manager`、`alice`、`bob`、`root`，密码均为 `Demo123!`。仅作为本机课程演示。
-数据在 `%LOCALAPPDATA%/Tongzhang/demo.db`，日志在同目录。关闭客户端后服务保留，便于多个客户端使用；系统重启后由启动器再次启动。
+- **账本与成员**：创建、切换账本，邀请成员加入，退出或移除成员，更换管理员并保留历史记录。
+- **收支管理**：新增收入和支出、多人金额分配、审核、驳回重交、更正及撤回。
+- **查询与统计**：按日期、类别、成员、金额和状态筛选，查看类别与成员收支汇总。
+- **预算与结算**：设置月度预算，计算可用预算和盈亏，保存可追溯的结算快照。
+- **权限与日志**：区分普通成员、账本管理员和超级管理员，记录关键操作及变更内容。
+- **托盘运行**：关闭窗口后收起到托盘，可恢复窗口或右键选择“彻底退出”。
 
-测试用 `TONGZHANG_PORT` 环境变量可以把服务、客户端和验收脚本整体换到其他端口，
-从而与正在运行的演示实例隔离；默认仍为 8765，日常启动无需设置。
+只有已审核账目计入财务汇总；结算保存快照，不清零、不转账。
 
-业务源码位于 `src/tongzhang`，测试使用独立临时数据库，不改演示账目。`requirements-lock.txt` 锁定当前已验证依赖。
+## 测试账号
 
-## 打包后的完整交互回归
+首次启动会自动创建以下账号：
 
-运行 `.venv/Scripts/python.exe scripts/run_packaged_e2e.py`。要求 8765 端口空闲；脚本会拒绝连接任何已运行的服务，以免改动现有数据。它从 `dist/Tongzhang/Tongzhang.exe` 启动客户端和服务端，在 `HW/HW3/检查/EXE完整验收-*` 中创建独立数据目录。
+| 账号 | 密码 | 身份 |
+| --- | --- | --- |
+| `manager` | `Demo123!` | 可创建账本，管理自己负责的账本 |
+| `alice` | `Demo123!` | 普通成员，小林 |
+| `bob` | `Demo123!` | 普通成员，小周 |
+| `root` | `Demo123!` | 超级管理员，可管理全部账本及更换管理员 |
 
-回归使用 Qt 输入驱动实际登录、建账、邀请、录入、审核、预算与结算表单，经真实 HTTP 保存数据；不直接调用业务服务。测试结束重启服务和客户端，核对持久化，再保存截图、逐步结果与 EXE SHA-256。测试专用入口为 `--e2e-ui` 和 `--e2e-resume`，由脚本管理，不用于日常启动。
+建议先用 `manager` 建账并邀请 `alice`，再用 `alice` 接受邀请、提交账目，最后切回 `manager` 审核。管理员不能审核本人提交或修改的记录，可由另一位有权管理员处理。
 
-## 窗口关闭与托盘退出
+## 启动与退出
 
-登录后点击右上角关闭会收起到 Windows 右下角托盘。单击/双击托盘图标或右键“显示主窗口”可以恢复；右键“彻底退出”结束当前客户端。最后一个客户端退出时回收同账后台服务，多个客户端同时运行时不影响其他窗口。取消登录也会释放当前实例；系统托盘不可用时关闭窗口正常退出。
+打开打包目录中的 `Tongzhang.exe`，保留旁边的 `_internal` 文件夹，无需安装 Python。仓库本地构建产物位于 `dist/Tongzhang/`，不随源码提交。
 
-打包后运行 `.venv/Scripts/python.exe scripts/verify_tray_package.py` 可在独立数据目录和端口验证实际托盘退出及服务端口释放。
+可同时打开多个客户端，用不同账号测试协作。默认服务地址为 `http://127.0.0.1:8765`，无需手动启动服务。
+
+点击右上角 **×** 会收起到右下角托盘；双击“同”字图标恢复，右键 **“彻底退出”** 关闭客户端。最后一个客户端退出时，后台服务一并关闭。
+
+账目保存在 `%LOCALAPPDATA%/Tongzhang/demo.db`，退出或重启不会清空。
+
+## 代码与开发
+
+采用 Python 3.12、PySide6、FastAPI 和 SQLite。源码在 `src/tongzhang/`，测试在 `tests/`，运行及构建脚本在 `scripts/`。
+
+在仓库根目录执行：
+
+```powershell
+pwsh -File scripts/setup.ps1  # 首次配置环境
+pwsh -File scripts/run.ps1    # 从源码启动
+pwsh -File scripts/check.ps1  # 检查与测试
+pwsh -File scripts/build.ps1  # 打包 Windows 程序
+```
